@@ -166,7 +166,7 @@ function printImage(imageId){
 		container : container
 	}
 	var msg = `<QueueMessage> <MessageText>${btoa(JSON.stringify(data))}</MessageText></QueueMessage>`	
-	getData("POST", "https://STORAGEACCOUNT.queue.core.windows.net/printerqueue/messages", msg, false, function(image, error){
+	getData("POST", "https://cloudfirstimages.queue.core.windows.net/printerqueue/messages", msg, false, function(image, error){
 		alert("Image sent to printer")
 	})
 }
