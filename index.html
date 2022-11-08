@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="">
+    <meta name="author" content="">
+    <meta name="generator" content="">
+    <title>Image Printer</title>
+
+
+    
+    <!-- Bootstrap core CSS -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+<link href="https://getbootstrap.com/docs/4.0/examples/album/album.css" rel="stylesheet" crossorigin="anonymous">
+<script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js" integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1" crossorigin="anonymous"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js" integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM" crossorigin="anonymous"></script>
+
+<script type="text/javascript" src="https://alcdn.msauth.net/browser/2.15.0/js/msal-browser.min.js"></script>
+
+
+
+    <!-- Favicons -->
+<meta name="theme-color" content="#7952b3">
+
+
+    <style>
+      .bd-placeholder-img {
+        font-size: 1.125rem;
+        text-anchor: middle;
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        user-select: none;
+      }
+
+      @media (min-width: 768px) {
+        .bd-placeholder-img-lg {
+          font-size: 3.5rem;
+        }
+      }
+	  
+.container-fluid {
+  margin-right: auto;
+  margin-left: auto;
+  max-width: 1000px; /* or 950px */
+}	  
+	  
+	  
+    </style>
+
+
+  </head>
+
+<script>
+
+var apiRoot = "https://cloudfirstimages.blob.core.windows.net/"
+var container = ""
+var accessToken = ""
+
+const pca = new msal.PublicClientApplication({
+	auth: {
+		clientId: "f91f7e41-9573-4668-8ca6-98caae4ea5f8",
+		authority: "https://login.microsoftonline.com/370b5daf-d057-40e2-b543-e92ab092f30e",
+		redirectUri: "https://green-wave-09d793810.2.azurestaticapps.net/",
+	},
+	cache: {
+		cacheLocation: "sessionStorage"
+	},
+	system: {
+		loggerOptions: {
+			loggerCallback(loglevel, message, containsPii) {
+				console.log(message);
+			},
+			piiLoggingEnabled: false,
+			logLevel: msal.LogLevel.Verbose,
+		}
+	}
+});
+
+const loginRequest = {
+	scopes: [
+		"https://storage.azure.com/user_impersonation"
+	]
+}
+
+function getData(method, query, body, isBlob, callback){
+
+	var bearer = `Bearer ${accessToken}`;
+
+	var xhr = new XMLHttpRequest();
+	xhr.onload = function() {
+		if (xhr.status != 200) { 
+			//alert(`Error ${xhr.status}: ${xhr.statusText}`)
+			callback(null, `Error ${xhr.status}: ${xhr.statusText}`)
+		} else { 
+			//alert(`API Called`)
+			callback(xhr, null)
+		}
+	};
+
+	xhr.onerror = function() { 
+		alert(`Network Error`);
+	};
+
+	var url = apiRoot + container + query
+
+	if(query.startsWith("http") || query.startsWith("https")){
+		url = query
+	}
+
+	xhr.open(method, url, true)
+	xhr.setRequestHeader("Authorization", bearer)			
+	xhr.setRequestHeader("x-ms-version", "2020-08-04")			
+	xhr.setRequestHeader("x-ms-date", new Date().toUTCString())			
+	if(isBlob){
+		xhr.responseType = 'blob';	
+	}
+	if (body){
+		if(body.type){
+			xhr.setRequestHeader("Content-Type", body.type)
+			xhr.setRequestHeader("x-ms-blob-type", "BlockBlob")
+		}
+		xhr.send(body);
+	}
+	else{
+		xhr.send();
+	}		
+
+}
+
+
+function login(){
+	pca.loginPopup(loginRequest).then((response) => {	
+		pca.acquireTokenSilent(response).then((tokenResponse) => {
+				
+			accessToken = tokenResponse.accessToken
+			container = tokenResponse.account.username.replaceAll("@","-").replaceAll(".","-") 
+			
+			getData("GET", "?restype=container&comp=list", null, false, function(imageResponse, error){
+				var images = [];
+				var thumbnails = [];
+				blobs = imageResponse.responseXML.childNodes[0].getElementsByTagName("Blobs")[0].getElementsByTagName("Blob")
+				for(var i = 0; i < blobs.length; i++){
+					var blob = blobs[i];
+					var name = blob.getElementsByTagName("Name")[0].textContent;
+					if (name.startsWith('images/')){
+						images.push(name.substring(7))
+					}else if(name.startsWith('thumbnails/')){
+						thumbnails.push(name.substring(11))
+					}
+				}
+				for(var i = 0; i < images.length; i++){
+					if (thumbnails.includes(images[i])){
+						getThumbnail(images[i])
+					}
+				}		
+			})
+		})		
+	})
+}
+
+function printImage(imageId){
+	var data = {
+		imageId : imageId,
+		container : container
+	}
+	var msg = `<QueueMessage> <MessageText>${btoa(JSON.stringify(data))}</MessageText></QueueMessage>`	
+	getData("POST", "https://STORAGEACCOUNT.queue.core.windows.net/printerqueue/messages", msg, false, function(image, error){
+		alert("Image sent to printer")
+	})
+}
+
+function show(imageId){
+	getData("GET", "/images/" + imageId, null, true, function(image, error){
+		var imageURL = window.URL.createObjectURL(image.response);
+		window.open(imageURL, '_blank').focus();
+	})
+}
+
+function getThumbnail(imageId){
+	getData("GET", "/thumbnails/" + imageId, null, true, function(image, error){
+		var src = window.URL.createObjectURL(image.response);	
+		showThumbnail(imageId, src)	
+	})
+}
+
+
+function showThumbnail(imageId, src){
+	htmlStr = `<div class="col-md-4">
+	  <div class="card mb-4 box-shadow">
+		<img class="card-img-top" src=${src} >
+		<div class="card-body">
+		  <p class="card-text">${imageId}</p>
+		  <div class="d-flex justify-content-between align-items-center">
+			<div class="btn-group">
+			  <button type="button" onclick="show('${imageId}')" class="btn btn-sm btn-outline-secondary">Show</button>
+			  <button type="button" onclick="printImage('${imageId}')" class="btn btn-sm btn-outline-secondary">Print</button>
+			</div>
+		  </div>
+		</div>
+	  </div>
+	</div>`
+	
+	var imageDiv = document.getElementById("imagediv")
+	imageDiv.innerHTML += htmlStr	
+}
+
+
+</script>
+  
+  <body onload="login()">    
+    <main role="main">
+      <div class="album py-5 bg-light">
+        <div class="container">
+		<div class="row"  id="imagediv">
+        </div>		
+        </div>
+	  </div>		
+    </main>	
+    
+  </body>
+</html>
